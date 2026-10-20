@@ -1,39 +1,94 @@
 (() => {
   const BUTTON_ID = "studylib-direct-pdf-download";
+  const PORT_NAME = "studylib-downloader";
   if (document.getElementById(BUTTON_ID)) return;
 
+  let port = null;
+  let requestId = 0;
+
   const findPdfUrl = () => {
-    const urlPattern = /(?:https?:)?\/\/(?:[a-z\d-]+\.)*studylib\.net\/store\/data\/\d+\.pdf(?:\?[^\s"'<>]*)?|\/store\/data\/\d+\.pdf(?:\?[^\s"'<>]*)?/gi;
-    const candidates = [];
-
-    for (const element of document.querySelectorAll("*")) {
-      for (const attribute of element.attributes) {
-        if (!attribute.value.includes("/store/data/")) continue;
-        for (const match of attribute.value.matchAll(urlPattern)) {
-          candidates.push(match[0]);
-        }
+    const performanceEntries = [];
+    try {
+      for (const entry of performance.getEntriesByType("resource")) {
+        performanceEntries.push(entry.name);
       }
+    } catch {
+      // Resource timing is optional; element and HTML scans still run.
     }
-
-    for (const candidate of candidates) {
-      try {
-        const url = new URL(candidate, location.href);
-        const isStudylibHost =
-          url.hostname === "studylib.net" || url.hostname.endsWith(".studylib.net");
-        if (
-          url.protocol === "https:" &&
-          isStudylibHost &&
-          /^\/store\/data\/\d+\.pdf$/i.test(url.pathname)
-        ) {
-          return url.href;
-        }
-      } catch {
-        // Ignore malformed links and keep looking for a valid PDF URL.
-      }
-    }
-
-    return null;
+    return StudyLibPdf.findPdfUrlFromDocument(document, { performanceEntries });
   };
+
+  const disconnectedError = (message) =>
+    /Receiving end does not exist|Extension context invalidated/i.test(message || "");
+
+  const connectPort = () => {
+    try {
+      port = chrome.runtime.connect({ name: PORT_NAME });
+      port.onDisconnect.addListener(() => {
+        port = null;
+        void chrome.runtime.lastError;
+      });
+      return port;
+    } catch {
+      port = null;
+      return null;
+    }
+  };
+
+  connectPort();
+
+  const openPdfFallback = (url) => {
+    const link = document.createElement("a");
+    link.href = url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.click();
+  };
+
+  const downloadViaPort = (payload) =>
+    new Promise((resolve) => {
+      const active = port || connectPort();
+      if (!active) {
+        resolve({ ok: false, disconnected: true, error: "Could not establish connection. Receiving end does not exist." });
+        return;
+      }
+
+      const onMessage = (response) => {
+        if (response?.type !== "studylib-download-result" || response.requestId !== payload.requestId) {
+          return;
+        }
+        active.onMessage.removeListener(onMessage);
+        resolve(response);
+      };
+
+      active.onMessage.addListener(onMessage);
+      try {
+        active.postMessage(payload);
+      } catch (error) {
+        active.onMessage.removeListener(onMessage);
+        resolve({ ok: false, disconnected: true, error: error.message });
+      }
+    });
+
+  const downloadViaMessage = (payload) =>
+    new Promise((resolve) => {
+      const attempt = (remaining) => {
+        chrome.runtime.sendMessage(payload, (response) => {
+          const runtimeError = chrome.runtime.lastError?.message;
+          if (disconnectedError(runtimeError) && remaining > 0) {
+            connectPort();
+            window.setTimeout(() => attempt(remaining - 1), 200);
+            return;
+          }
+          if (runtimeError) {
+            resolve({ ok: false, disconnected: disconnectedError(runtimeError), error: runtimeError });
+            return;
+          }
+          resolve(response || { ok: false, error: "Falha desconhecida." });
+        });
+      };
+      attempt(3);
+    });
 
   const button = document.createElement("button");
   button.id = BUTTON_ID;
@@ -55,7 +110,7 @@
     font: "600 14px/1.2 system-ui, sans-serif"
   });
 
-  button.addEventListener("click", () => {
+  button.addEventListener("click", async () => {
     const pdfUrl = findPdfUrl();
     if (!pdfUrl) {
       button.textContent = "PDF não encontrado nesta página";
@@ -69,29 +124,41 @@
 
     button.disabled = true;
     button.textContent = "Preparando download…";
-    chrome.runtime.sendMessage(
-      {
-        type: "studylib-download-pdf",
-        url: pdfUrl,
-        filename: document.title || "studylib-document"
-      },
-      (response) => {
-        if (chrome.runtime.lastError || !response?.ok) {
-          button.disabled = false;
-          button.textContent = "⬇ Tentar baixar novamente";
-          console.error(
-            "[StudyLib Downloader] Falha ao iniciar o download:",
-            response?.error || chrome.runtime.lastError?.message
-          );
-          return;
-        }
 
-        button.textContent = "Download iniciado";
-        window.setTimeout(() => {
-          button.remove();
-        }, 2500);
-      }
-    );
+    const payload = {
+      type: "studylib-download-pdf",
+      requestId: ++requestId,
+      url: pdfUrl,
+      filename: document.title || "studylib-document"
+    };
+
+    let result = await downloadViaPort(payload);
+    if (!result?.ok) {
+      result = await downloadViaMessage(payload);
+    }
+
+    if (result?.ok) {
+      button.textContent = "Download iniciado";
+      window.setTimeout(() => button.remove(), 2500);
+      return;
+    }
+
+    if (result?.disconnected) {
+      openPdfFallback(pdfUrl);
+      button.disabled = false;
+      button.textContent = "⬇ Recarregue a página";
+      button.title = "O arquivo pode ter aberto em outra aba. Recarregue esta página e clique de novo. Se atualizou a extensão agora, recarregue a extensão e depois esta página.";
+      console.error(
+        "[StudyLib Downloader] Falha ao iniciar o download:",
+        "Recarregue a página do documento. Se atualizou a extensão, recarregue a extensão e depois a página."
+      );
+      return;
+    }
+
+    button.disabled = false;
+    button.textContent = "⬇ Tentar baixar novamente";
+    button.title = result?.error || "Falha desconhecida.";
+    console.error("[StudyLib Downloader] Falha ao iniciar o download:", result?.error || "Falha desconhecida.");
   });
 
   (document.body || document.documentElement).appendChild(button);

@@ -63,6 +63,12 @@ Na primeira imagem, o botão da extensão aparece na página do documento. A seg
 
 No Firefox, a instalação temporária é removida ao reiniciar o navegador. Este repositório não publica nem assina um pacote para instalação permanente.
 
+## Se o download não começar
+
+Recarregue a página do documento e clique no botão outra vez.
+
+Se você acabou de atualizar ou recarregar a extensão no navegador, recarregue também a página do StudyLib antes de tentar de novo.
+
 ## Permissões e privacidade
 
 - `downloads`: inicia o download somente depois do clique no botão.

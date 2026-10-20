@@ -10,6 +10,8 @@ assignees: ""
 
 Descreva o problema de forma objetiva.
 
+Antes de abrir o relato, recarregue a página do documento e tente de novo. Se você acabou de atualizar a extensão, recarregue a extensão no navegador e, em seguida, a página.
+
 ## Como reproduzir
 
 1. Navegador e versão:
