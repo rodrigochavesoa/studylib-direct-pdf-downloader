@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "StudyLib Direct PDF Downloader",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Exibe um botão para baixar o PDF associado a uma página do StudyLib.",
   "icons": {
     "16": "icons/icon16.png",
@@ -9,7 +9,10 @@
     "128": "icons/icon128.png"
   },
   "permissions": ["downloads"],
-  "host_permissions": ["https://*.studylib.net/*"],
+  "host_permissions": [
+    "https://studylib.net/*",
+    "https://*.studylib.net/*"
+  ],
   "background": {
     "scripts": ["background.js"]
   },
@@ -24,7 +27,7 @@
   "content_scripts": [
     {
       "matches": ["https://studylib.net/doc/*"],
-      "js": ["content.js"],
+      "js": ["find-pdf-url.js", "content.js"],
       "run_at": "document_idle"
     }
   ]
